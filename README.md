@@ -5,6 +5,9 @@
 [![Continuous Integration](https://img.shields.io/github/actions/workflow/status/builditluc/wiki-tui/ci.yml?label=Continuous%20Integration&style=for-the-badge)](https://github.com/Builditluc/wiki-tui/actions/workflows/ci.yml)
 [![Continuous Deployment](https://img.shields.io/github/actions/workflow/status/builditluc/wiki-tui/cd.yml?label=Continuous%20Deployment&style=for-the-badge)](https://github.com/Builditluc/wiki-tui/actions/workflows/cd.yml)
 
+# Notice: Thanks to everyone who has used, starred, or contributed to this project! Due to a lack of time, I am no longer able to actively develop or provide support for wiki-tui.
+If you've alternative projects, write me and I can link to them here in the readme.
+
 <br />
 <p align="center">
   <a href="https://github.com/Builditluc/wiki-tui">
