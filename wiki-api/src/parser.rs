@@ -5,7 +5,7 @@ use tracing::{trace, warn};
 use url::Url;
 
 use crate::{
-    document::{Data, HeaderKind, Raw, UnsupportedElement},
+    document::{Data, HeaderKind, Raw, UnsupportedElement, ImageData},
     languages::Language,
     page::{
         link_data::{AnchorData, ExternalData, ExternalToInteralData, InternalData, MediaData},
@@ -69,14 +69,13 @@ impl WikipediaParser {
                         ignore_children = true;
                         Data::Unsupported(UnsupportedElement::Table)
                     }
-                    "image" => {
+                    "img" => {
                         ignore_children = true;
-                        Data::Unsupported(UnsupportedElement::Image)
+                        Self::parse_image(&self.endpoint, &attrs).unwrap_or_default()
                     }
-                    "figure" => {
-                        ignore_children = true;
-                        Data::Unsupported(UnsupportedElement::Figure)
-                    }
+
+                    "figure" => Data::Division,
+                    
                     "pre" => {
                         ignore_children = true;
                         Data::Unsupported(UnsupportedElement::PreformattedText)
@@ -301,6 +300,23 @@ impl WikipediaParser {
             id: header_id,
             kind,
         })
+    }
+
+    fn parse_image(endpoint: &Url, attrs: &[(String, String)]) -> Option<Data> {
+        let src = attrs
+            .iter()
+            .find(|(name, _)| name.as_str() == "src")
+            .map(|(_, value)| value.to_owned())?;
+
+        let alt = attrs
+            .iter()
+            .find(|(name, _)| name.as_str() == "alt")
+            .map(|(_, value)| value.to_owned())
+            .unwrap_or_default();
+
+        let src = endpoint.join(&src).ok()?;
+
+        Some(Data::Image(ImageData { src, alt }))
     }
 
     fn parse_link(endpoint: &Url, language: Language, attrs: &[(String, String)]) -> Option<Data> {

@@ -2,6 +2,8 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use crate::page::Link;
 
+use url::Url;
+
 #[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Document {
     pub nodes: Vec<Raw>,
@@ -68,14 +70,24 @@ pub enum Data {
     #[default]
     Unknown,
 
+    Image(ImageData),
+
     Unsupported(UnsupportedElement),
     UnsupportedInline(UnsupportedElement),
 }
 
+
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ImageData {
+    pub src: Url,
+    pub alt: String,
+}
+
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum UnsupportedElement {
     Table,
-    Image,
     Figure,
     MathElement,
     PreformattedText,

@@ -2,7 +2,7 @@ use ratatui::style::{Color, Modifier, Style};
 use textwrap::wrap_algorithms::{wrap_optimal_fit, Penalties};
 use tracing::warn;
 use wiki_api::{
-    document::{Data, Document, HeaderKind, Node, UnsupportedElement},
+    document::{Data, Document, HeaderKind, Node, UnsupportedElement, ImageData},
     page::Link,
 };
 
@@ -529,6 +529,18 @@ impl<'a> Renderer {
         self.add_whitespace();
     }
 
+    fn render_image(&mut self, node: Node<'a>, image: &ImageData) {
+        self.ensure_empty_line();
+
+        self.add_modifier(Modifier::ITALIC);
+        self.set_text_fg(Color::DarkGray);
+        self.render_string(&format!("[image: {}]", image.src), node.index());
+        self.reset_text_fg();
+        self.remove_modifier(Modifier::ITALIC);
+
+        self.ensure_empty_line();
+    }
+
     fn render_unsupported_element(
         &mut self,
         inline: bool,
@@ -556,7 +568,6 @@ impl<'a> Renderer {
 
         let message = match element {
             UnsupportedElement::Table => "<Unsupported Element 'Table'>",
-            UnsupportedElement::Image => "<Unsupported Element 'Image'>",
             UnsupportedElement::Figure => "<Unsupported Element 'Figure'>",
             UnsupportedElement::MathElement => "<Unsupported Element 'Math Element'>",
             UnsupportedElement::PreformattedText => "<Unsupported Element 'PreformattedText'>",
@@ -592,6 +603,7 @@ impl<'a> Renderer {
             Data::Linebreak => self.render_linebreak(node),
             Data::Link(link) => self.render_link(node, link.clone()),
             Data::Unknown => self.render_children(node),
+            Data::Image(image) => self.render_image(node, image),
             Data::Unsupported(element) => {
                 self.render_unsupported_element(false, element, node.index())
             }
