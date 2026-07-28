@@ -532,11 +532,17 @@ impl<'a> Renderer {
     fn render_image(&mut self, node: Node<'a>, image: &ImageData) {
         self.ensure_empty_line();
 
-        self.add_modifier(Modifier::ITALIC);
-        self.set_text_fg(Color::DarkGray);
-        self.render_string(&format!("[image: {}]", image.src), node.index());
+        self.add_modifier(Modifier::ITALIC | Modifier::UNDERLINED);
+        self.set_text_fg(Color::Blue);
+
+        let label = if image.alt.trim().is_empty() {
+            "[img]".to_string()
+        } else { format!("[img] {}", image.alt) };
+
+        self.render_string(&label, node.index());
+
         self.reset_text_fg();
-        self.remove_modifier(Modifier::ITALIC);
+        self.remove_modifier(Modifier::ITALIC | Modifier::UNDERLINED);
 
         self.ensure_empty_line();
     }
@@ -567,7 +573,6 @@ impl<'a> Renderer {
         self.add_modifier(Modifier::ITALIC);
 
         let message = match element {
-            UnsupportedElement::Table => "<Unsupported Element 'Table'>",
             UnsupportedElement::Figure => "<Unsupported Element 'Figure'>",
             UnsupportedElement::MathElement => "<Unsupported Element 'Math Element'>",
             UnsupportedElement::PreformattedText => "<Unsupported Element 'PreformattedText'>",
@@ -604,6 +609,8 @@ impl<'a> Renderer {
             Data::Link(link) => self.render_link(node, link.clone()),
             Data::Unknown => self.render_children(node),
             Data::Image(image) => self.render_image(node, image),
+            //Data::Table => (),
+            //Data::TableRow | Data::TableCell { .. } => self.render_children(node),
             Data::Unsupported(element) => {
                 self.render_unsupported_element(false, element, node.index())
             }

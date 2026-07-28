@@ -65,10 +65,8 @@ impl WikipediaParser {
                 let data = match name.as_str() {
                     "head" | "style" | "link" => return prev,
 
-                    "table" => {
-                        ignore_children = true;
-                        Data::Unsupported(UnsupportedElement::Table)
-                    }
+                    //"table" => Data::Table,
+
                     "img" => {
                         ignore_children = true;
                         Self::parse_image(&self.endpoint, &attrs).unwrap_or_default()
@@ -191,6 +189,12 @@ impl WikipediaParser {
                     "dl" => Data::DescriptionList,
                     "dt" => Data::DescriptionListTerm,
                     "dd" => Data::DerscriptionListDescription,
+
+                    //"tr" => Data::TableRow,
+                    //"td" => Data::TableCell { header: false },
+                    //"th" => Data::TableCell { header: true },
+
+                    //"tbody" | "thead" | "tfoot" => Data::Division,
 
                     "br" => Data::Linebreak,
 

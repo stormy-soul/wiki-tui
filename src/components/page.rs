@@ -755,15 +755,21 @@ impl Component for PageComponent {
         self.viewport.height = page_area.height;
 
         let rendered_page = rendered_page!(self, page_area.width);
+        let mut image_patches: Vec<(u16, u16, String, String)> = Vec::new(); // (x, line_idx, text, url)
+        
         let mut lines: Vec<Line> = rendered_page
             .lines
             .iter()
             .skip(self.viewport.top() as usize)
             .take(self.viewport.bottom() as usize)
-            .map(|line| {
+            .enumerate()
+            .map(|(line_idx, line)| {
                 let mut spans: Vec<Span> = Vec::new();
+                let mut x_offset: u16 = 0;
+
                 line.iter()
                     .map(|word| {
+                        let word_chars = word.content.chars().count() as u16;
                         let mut span = Span::styled(
                             format!(
                                 "{}{}",
@@ -779,9 +785,19 @@ impl Component for PageComponent {
                                 span = span
                                     .patch_style(Style::new().add_modifier(Modifier::UNDERLINED))
                             }
+
+                            if let Data::Image(image) = node.data() {
+                                image_patches.push((
+                                    x_offset,
+                                    line_idx as u16,
+                                    word.content.clone(),
+                                    image.src.to_string(),
+                                ));
+                            }
                         }
 
                         spans.push(span);
+                        x_offset += word_chars + word.whitespace_width as u16;
                     })
                     .count();
                 Line {
@@ -799,7 +815,25 @@ impl Component for PageComponent {
             lines.pop();
         }
 
+        let y_shift: u16 = if self.viewport.y == 0 { 1 } else { 0 };
+
         f.render_widget(Paragraph::new(lines), page_area);
+
+        for (x, line_idx, text, url) in image_patches {
+            let y = line_idx + y_shift;
+            if y >= page_area.height { continue; }
+
+            let abs_y = page_area.y + y;
+            let chars: Vec<char> = text.chars().collect();
+            for (i, chunk) in chars.chunks(2).enumerate() {
+                let cx = page_area.x + x + (i as u16) * 2;
+                if cx >= page_area.x + page_area.width { break; }
+
+                let chunk_str: String = chunk.iter().collect();
+                let hyperlink = format!("\x1B]8;;{}\x07{}\x1B]8;;\x07", url, chunk_str);
+                f.buffer_mut()[(cx, abs_y)].set_symbol(&hyperlink);
+            }
+        }
 
         if !self.is_zen_mode || zen_mode.contains(ZenModeComponents::SCROLLBAR) {
             self.render_scrollbar(

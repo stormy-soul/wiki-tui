@@ -72,6 +72,10 @@ pub enum Data {
 
     Image(ImageData),
 
+    //Table,
+    //TableRow,
+    //TableCell { header: bool },
+
     Unsupported(UnsupportedElement),
     UnsupportedInline(UnsupportedElement),
 }
@@ -87,7 +91,6 @@ pub struct ImageData {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum UnsupportedElement {
-    Table,
     Figure,
     MathElement,
     PreformattedText,
