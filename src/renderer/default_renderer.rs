@@ -18,6 +18,12 @@ const BLOCKQUOTE_PADDING: u8 = 4;
 const LIST_PADDING: u8 = 1;
 const LIST_PREFIX: char = '-';
 
+enum BorderPos {
+    Top,
+    Middle,
+    Bottom,
+}
+
 struct Renderer {
     rendered_lines: Vec<Vec<Word>>,
     links: Vec<(usize, usize)>,
@@ -273,6 +279,167 @@ impl<'a> Renderer {
         };
         self.current_line.push(line);
         self.clear_line();
+    }
+
+    fn cell_colspan(cell: &Node<'a>) -> usize {
+        match cell.data() {
+            Data::TableCell { colspan, .. } => (*colspan).max(1),
+            _ => 1,
+        }
+    }
+
+    fn render_table(&mut self, node: Node<'a>) {
+        self.ensure_empty_line();
+
+        let rows: Vec<Vec<Node<'a>>> = node
+            .descendants()
+            .filter(|n| matches!(n.data(), Data::TableRow))
+            .map(|row| {
+                row.children()
+                    .filter(|c| matches!(c.data(), Data::TableCell { .. }))
+                    .collect()
+            })
+            .collect();
+        let col_count = rows
+            .iter()
+            .map(|r| r.iter().map(Self::cell_colspan).sum())
+            .max()
+            .unwrap_or(0);
+        if col_count == 0 { self.ensure_empty_line(); return; }
+
+        let border_chars = col_count as u16 + 1;
+        let available = self.width.saturating_sub(border_chars);
+        let col_width = (available / col_count as u16).max(3);
+
+        self.render_table_border(col_count, col_width, BorderPos::Top);
+        for (i, row) in rows.iter().enumerate() {
+            self.render_table_row(row, col_count, col_width);
+            if i + 1 < rows.len() { 
+                self.render_table_border(col_count, col_width, BorderPos::Middle);
+            }
+        }
+        self.render_table_border(col_count, col_width, BorderPos::Bottom);
+        
+        self.ensure_empty_line();
+    }
+
+    fn render_table_border(&mut self, col_count: usize, col_width: u16, pos: BorderPos) {
+        let (left, fill, sep, right) = match pos {
+            BorderPos::Top    => ('┌', '─', '┬', '┐'),
+            BorderPos::Middle => ('├', '─', '┼', '┤'),
+            BorderPos::Bottom => ('└', '─', '┴', '┘'),
+        };
+
+        let mut line = String::new();
+        line.push(left);
+
+        for i in 0..col_count {
+            line.push_str(&fill.to_string().repeat(col_width as usize));
+            line.push(if i + 1 < col_count { sep } else { right });
+        }
+
+        self.clear_line();
+        self.current_line.push(Word {
+            index: usize::MAX,
+            content: line.clone(),
+            style: Style::default().fg(Color::DarkGray),
+            width: line.chars().count() as f64,
+            whitespace_width: 0.0,
+            penalty_width: 0.0,
+        });
+        self.clear_line();
+    }
+
+    fn render_table_row(&mut self, cells: &[Node<'a>], col_count: usize, col_width: u16) {
+        let mut plan: Vec<(Option<Node<'a>>, usize)> = cells
+            .iter()
+            .map(|c| (Some(*c), Self::cell_colspan(c)))
+            .collect();
+
+        let covered: usize = plan.iter().map(|(_, span)| *span).sum();
+        if covered < col_count { plan.push((None, col_count - covered)); }
+
+        let rendered: Vec<(Vec<Vec<Word>>, usize)> = plan
+            .into_iter()
+            .map(|(cell, span)| {
+                let lines = match cell {
+                    Some(c) => {
+                        let header = matches!(c.data(), Data::TableCell { header: true, .. });
+                        let width = col_width * span as u16 + (span as u16).saturating_sub(1);
+                        Self::render_subtree(c, width, header)
+                    }
+                    None => Vec::new(),
+                };
+                (lines, span)
+            })
+        .collect();
+
+        let mut merged: Vec<(Vec<Vec<Word>>, usize)> = Vec::new();
+        for (lines, span) in rendered {
+            if Self::cell_is_empty(&lines) {
+                if let Some(last) = merged.last_mut() {
+                    if Self::cell_is_empty(&last.0) {
+                        last.1 += span;
+                        continue;
+                    }
+                }
+            }
+            merged.push((lines, span));
+        }
+
+        let row_height = merged.iter().map(|(lines, _)| lines.len()).max().unwrap_or(1).max(1);
+        let border = |content: &str| Word {
+            index: usize::MAX,
+            content: content.to_string(),
+            style: Style::default().fg(Color::DarkGray),
+            width: 1.0,
+            whitespace_width: 0.0,
+            penalty_width: 0.0,
+        };
+
+        for line_idx in 0..row_height {
+            self.clear_line();
+            self.current_line.push(border("|"));
+
+            for (lines, span) in &merged {
+                let width = col_width * (*span) as u16 + (*span as u16).saturating_sub(1);
+                let words = lines.get(line_idx).cloned().unwrap_or_default();
+                let used: usize = words
+                    .iter()
+                    .map(|w| w.width as usize + w.whitespace_width as usize)
+                    .sum();
+                let pad = (width as usize).saturating_sub(used).min(255) as u8;
+
+                self.current_line.extend(words);
+                self.current_line.push(self.n_whitespace(pad));
+                self.current_line.push(border("|"));
+            }
+
+            self.clear_line();
+        }
+    }
+
+    fn render_subtree(node: Node<'a>, width: u16, bold: bool) -> Vec<Vec<Word>> {
+        let mut sub = Renderer {
+            rendered_lines: Vec::new(),
+            links: Vec::new(),
+            current_line: Vec::new(),
+            width,
+            text_style: if bold { 
+                Style::default().add_modifier(Modifier::BOLD)
+            } else { 
+                Style::default()
+            },
+            left_padding: 0,
+            prefix: None,
+        };
+        sub.render_children(node);
+        sub.clear_line();
+        sub.rendered_lines
+    }
+
+    fn cell_is_empty(lines: &[Vec<Word>]) -> bool {
+        lines.iter().all(|line| line.iter().all(|w| w.content.trim().is_empty()))
     }
 
     fn render_children(&mut self, node: Node<'a>) {
@@ -609,8 +776,8 @@ impl<'a> Renderer {
             Data::Link(link) => self.render_link(node, link.clone()),
             Data::Unknown => self.render_children(node),
             Data::Image(image) => self.render_image(node, image),
-            //Data::Table => (),
-            //Data::TableRow | Data::TableCell { .. } => self.render_children(node),
+            Data::Table => self.render_table(node),
+            Data::TableRow | Data::TableCell { .. } => self.render_children(node),
             Data::Unsupported(element) => {
                 self.render_unsupported_element(false, element, node.index())
             }

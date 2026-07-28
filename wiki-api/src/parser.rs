@@ -65,7 +65,7 @@ impl WikipediaParser {
                 let data = match name.as_str() {
                     "head" | "style" | "link" => return prev,
 
-                    //"table" => Data::Table,
+                    "table" => Data::Table,
 
                     "img" => {
                         ignore_children = true;
@@ -190,11 +190,17 @@ impl WikipediaParser {
                     "dt" => Data::DescriptionListTerm,
                     "dd" => Data::DerscriptionListDescription,
 
-                    //"tr" => Data::TableRow,
-                    //"td" => Data::TableCell { header: false },
-                    //"th" => Data::TableCell { header: true },
+                    "tr" => Data::TableRow,
+                    "td" => Data::TableCell { 
+                        header: false,
+                        colspan: Self::parse_colspan(&attrs)
+                    },
+                    "th" => Data::TableCell {
+                        header: true,
+                        colspan: Self::parse_colspan(&attrs)
+                    },
 
-                    //"tbody" | "thead" | "tfoot" => Data::Division,
+                    "tbody" | "thead" | "tfoot" => Data::Division,
 
                     "br" => Data::Linebreak,
 
@@ -321,6 +327,15 @@ impl WikipediaParser {
         let src = endpoint.join(&src).ok()?;
 
         Some(Data::Image(ImageData { src, alt }))
+    }
+
+    fn parse_colspan(attrs: &[(String, String)]) -> usize {
+        attrs
+            .iter()
+            .find(|(name, _)| name.as_str() =="colspan")
+            .and_then(|(_, value)| value.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(1)
     }
 
     fn parse_link(endpoint: &Url, language: Language, attrs: &[(String, String)]) -> Option<Data> {

@@ -72,9 +72,12 @@ pub enum Data {
 
     Image(ImageData),
 
-    //Table,
-    //TableRow,
-    //TableCell { header: bool },
+    Table,
+    TableRow,
+    TableCell { 
+        header: bool,
+        colspan: usize,
+    },
 
     Unsupported(UnsupportedElement),
     UnsupportedInline(UnsupportedElement),
