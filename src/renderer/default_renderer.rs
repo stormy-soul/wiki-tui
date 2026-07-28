@@ -2,7 +2,7 @@ use ratatui::style::{Color, Modifier, Style};
 use textwrap::wrap_algorithms::{wrap_optimal_fit, Penalties};
 use tracing::warn;
 use wiki_api::{
-    document::{Data, Document, HeaderKind, Node, UnsupportedElement, ImageData},
+    document::{Data, Document, HeaderKind, ImageData, Node, UnsupportedElement},
     page::Link,
 };
 
@@ -17,12 +17,6 @@ const BLOCKQUOTE_PADDING: u8 = 4;
 
 const LIST_PADDING: u8 = 1;
 const LIST_PREFIX: char = '-';
-
-enum BorderPos {
-    Top,
-    Middle,
-    Bottom,
-}
 
 struct Renderer {
     rendered_lines: Vec<Vec<Word>>,
@@ -288,106 +282,58 @@ impl<'a> Renderer {
         }
     }
 
-    fn render_table(&mut self, node: Node<'a>) {
-        self.ensure_empty_line();
+    fn plan_table_row(cells: &[Node<'a>], col_count: usize, col_width: u16)
+        -> (Vec<(Vec<Vec<Word>>, usize)>, Vec<bool>) {
+            let mut plan: Vec<(Option<Node<'a>>, usize)> = cells
+                .iter()
+                .map(|c| (Some(*c), Self::cell_colspan(c)))
+                .collect();
 
-        let rows: Vec<Vec<Node<'a>>> = node
-            .descendants()
-            .filter(|n| matches!(n.data(), Data::TableRow))
-            .map(|row| {
-                row.children()
-                    .filter(|c| matches!(c.data(), Data::TableCell { .. }))
-                    .collect()
-            })
-            .collect();
-        let col_count = rows
-            .iter()
-            .map(|r| r.iter().map(Self::cell_colspan).sum())
-            .max()
-            .unwrap_or(0);
-        if col_count == 0 { self.ensure_empty_line(); return; }
+            let covered: usize = plan.iter().map(|(_, span)| *span).sum();
+            if covered < col_count { plan.push((None, col_count - covered)); }
 
-        let border_chars = col_count as u16 + 1;
-        let available = self.width.saturating_sub(border_chars);
-        let col_width = (available / col_count as u16).max(3);
+            let rendered: Vec<(Vec<Vec<Word>>, usize)> = plan
+                .into_iter()
+                .map(|(cell, span)| {
+                    let lines = match cell {
+                        Some(c) => {
+                            let header = matches!(c.data(), Data::TableCell { header: true, .. });
+                            let width = col_width * span as u16 + (span as u16).saturating_sub(1);
+                            Self::render_subtree(c, width, header)
+                        }
+                        None => Vec::new(),
+                    };
+                    (lines, span)
+                })
+                .collect();
 
-        self.render_table_border(col_count, col_width, BorderPos::Top);
-        for (i, row) in rows.iter().enumerate() {
-            self.render_table_row(row, col_count, col_width);
-            if i + 1 < rows.len() { 
-                self.render_table_border(col_count, col_width, BorderPos::Middle);
-            }
-        }
-        self.render_table_border(col_count, col_width, BorderPos::Bottom);
-        
-        self.ensure_empty_line();
-    }
-
-    fn render_table_border(&mut self, col_count: usize, col_width: u16, pos: BorderPos) {
-        let (left, fill, sep, right) = match pos {
-            BorderPos::Top    => ('┌', '─', '┬', '┐'),
-            BorderPos::Middle => ('├', '─', '┼', '┤'),
-            BorderPos::Bottom => ('└', '─', '┴', '┘'),
-        };
-
-        let mut line = String::new();
-        line.push(left);
-
-        for i in 0..col_count {
-            line.push_str(&fill.to_string().repeat(col_width as usize));
-            line.push(if i + 1 < col_count { sep } else { right });
-        }
-
-        self.clear_line();
-        self.current_line.push(Word {
-            index: usize::MAX,
-            content: line.clone(),
-            style: Style::default().fg(Color::DarkGray),
-            width: line.chars().count() as f64,
-            whitespace_width: 0.0,
-            penalty_width: 0.0,
-        });
-        self.clear_line();
-    }
-
-    fn render_table_row(&mut self, cells: &[Node<'a>], col_count: usize, col_width: u16) {
-        let mut plan: Vec<(Option<Node<'a>>, usize)> = cells
-            .iter()
-            .map(|c| (Some(*c), Self::cell_colspan(c)))
-            .collect();
-
-        let covered: usize = plan.iter().map(|(_, span)| *span).sum();
-        if covered < col_count { plan.push((None, col_count - covered)); }
-
-        let rendered: Vec<(Vec<Vec<Word>>, usize)> = plan
-            .into_iter()
-            .map(|(cell, span)| {
-                let lines = match cell {
-                    Some(c) => {
-                        let header = matches!(c.data(), Data::TableCell { header: true, .. });
-                        let width = col_width * span as u16 + (span as u16).saturating_sub(1);
-                        Self::render_subtree(c, width, header)
-                    }
-                    None => Vec::new(),
-                };
-                (lines, span)
-            })
-        .collect();
-
-        let mut merged: Vec<(Vec<Vec<Word>>, usize)> = Vec::new();
-        for (lines, span) in rendered {
-            if Self::cell_is_empty(&lines) {
-                if let Some(last) = merged.last_mut() {
-                    if Self::cell_is_empty(&last.0) {
-                        last.1 += span;
-                        continue;
+            let mut merged: Vec<(Vec<Vec<Word>>, usize)> = Vec::new();
+            for (lines, span) in rendered {
+                if Self::cell_is_empty(&lines) {
+                    if let Some(last) = merged.last_mut() {
+                        if Self::cell_is_empty(&last.0) {
+                            last.1 += span;
+                            continue;
+                        }
                     }
                 }
+                merged.push((lines, span));
             }
-            merged.push((lines, span));
-        }
 
-        let row_height = merged.iter().map(|(lines, _)| lines.len()).max().unwrap_or(1).max(1);
+            let mut divisions = vec![false; col_count.saturating_sub(1)];
+            let mut pos = 0usize;
+            for (idx, (_, span)) in merged.iter().enumerate() {
+                pos += span;
+                if idx + 1 < merged.len() && pos >= 1 {
+                    divisions[pos - 1] = true;
+                }
+            }
+
+        (merged, divisions)
+    }
+
+    fn render_table_row_content(&mut self, blocks: &[(Vec<Vec<Word>>, usize)], col_width: u16) {
+        let row_height =blocks.iter().map(|(lines, _)| lines.len()).max().unwrap_or(1).max(1);
         let border = |content: &str| Word {
             index: usize::MAX,
             content: content.to_string(),
@@ -401,7 +347,7 @@ impl<'a> Renderer {
             self.clear_line();
             self.current_line.push(border("|"));
 
-            for (lines, span) in &merged {
+            for (lines, span) in blocks {
                 let width = col_width * (*span) as u16 + (*span as u16).saturating_sub(1);
                 let words = lines.get(line_idx).cloned().unwrap_or_default();
                 let used: usize = words
@@ -417,6 +363,98 @@ impl<'a> Renderer {
 
             self.clear_line();
         }
+    }
+
+    fn render_table(&mut self, node: Node<'a>) {
+        self.ensure_empty_line();
+
+        let rows: Vec<Vec<Node<'a>>> = node
+            .descendants()
+            .filter(|n| matches!(n.data(), Data::TableRow))
+            .map(|row| {
+                row.children()
+                    .filter(|c| matches!(c.data(), Data::TableCell { .. }))
+                    .collect()
+            })
+            .collect();
+
+        let col_count = rows
+            .iter()
+            .map(|r| r.iter().map(Self::cell_colspan).sum())
+            .max()
+            .unwrap_or(0);
+        if col_count == 0 { self.ensure_empty_line(); return; }
+
+        let border_chars = col_count as u16 + 1;
+        let available = self.width.saturating_sub(border_chars);
+        let col_width = (available / col_count as u16).max(3);
+
+        let planned: Vec<(Vec<(Vec<Vec<Word>>, usize)>, Vec<bool>)> = rows
+            .iter()
+            .map(|row| Self::plan_table_row(row, col_count, col_width))
+            .collect();
+
+        for (i, (blocks, divisions)) in planned.iter().enumerate() {
+            let left = if i == 0 { None } else { Some(planned[i - 1].1.as_slice()) };
+            self.render_table_border(col_count, col_width, left, Some(divisions.as_slice()));
+            self.render_table_row_content(blocks, col_width);
+        }
+
+        if let Some((_, last_divisions)) = planned.last() {
+            self.render_table_border(col_count, col_width, Some(last_divisions.as_slice()), None);
+        }
+
+        self.ensure_empty_line();
+    }
+
+    fn render_table_border(
+        &mut self,
+        col_count: usize,
+        col_width: u16,
+        left: Option<&[bool]>,
+        right: Option<&[bool]>,
+    ) {
+        let is_top = left.is_none();
+        let is_bottom = right.is_none();
+
+        let (corner_left, corner_right) = match (is_top, is_bottom) {
+            (true, _) => ('┌', '┐'),
+            (_, true) => ('└', '┘'),
+            _ => ('├', '┤'),
+        };
+
+
+        let mut line = String::new();
+        line.push(corner_left);
+
+        for col in 0..col_count {
+            line.push_str(&"─".repeat(col_width as usize));
+            if col + 1< col_count {
+                let above = left.map(|d| d[col]).unwrap_or(false);
+                let below = right.map(|d| d[col]).unwrap_or(false);
+
+                let tick = match (above, below) {
+                    (false, false) => '─',
+                    (true, true) => '┼',
+                    (true, false) => '┴',
+                    (false, true) => '┬',
+                };
+
+                line.push(tick);
+            }
+        }
+        line.push(corner_right);
+
+        self.clear_line();
+        self.current_line.push(Word {
+            index: usize::MAX,
+            content: line.clone(),
+            style: Style::default().fg(Color::DarkGray),
+            width: line.chars().count() as f64,
+            whitespace_width: 0.0,
+            penalty_width: 0.0,
+        });
+        self.clear_line();
     }
 
     fn render_subtree(node: Node<'a>, width: u16, bold: bool) -> Vec<Vec<Word>> {
@@ -740,7 +778,6 @@ impl<'a> Renderer {
         self.add_modifier(Modifier::ITALIC);
 
         let message = match element {
-            UnsupportedElement::Figure => "<Unsupported Element 'Figure'>",
             UnsupportedElement::MathElement => "<Unsupported Element 'Math Element'>",
             UnsupportedElement::PreformattedText => "<Unsupported Element 'PreformattedText'>",
         };

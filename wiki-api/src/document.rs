@@ -94,7 +94,6 @@ pub struct ImageData {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum UnsupportedElement {
-    Figure,
     MathElement,
     PreformattedText,
 }
