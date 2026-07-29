@@ -1,6 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex}
+};
 
 use crossterm::event::{KeyCode, KeyEvent};
+use tokio::sync::mpsc::UnboundedSender;
 use ratatui::{
     layout::{Constraint, Direction, Flex, Layout},
     prelude::{Margin, Rect},
@@ -8,6 +12,9 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, List, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
+
+use ratatui_image::StatefulImage;
+
 use tracing::{debug, info, warn};
 use wiki_api::{
     document::{Data, Node},
@@ -89,6 +96,11 @@ pub struct PageComponent {
     config: Arc<Config>,
     #[serde(skip)]
     theme: Arc<Theme>,
+    #[serde(skip)]
+    pub picker: Option<ratatui_image::picker::Picker>,
+
+    #[serde(skip)]
+    image_cache: Arc<Mutex<HashMap<usize, ratatui_image::protocol::StatefulProtocol>>>,
 
     is_contents: bool,
     is_zen_mode: bool,
@@ -97,11 +109,19 @@ pub struct PageComponent {
 }
 
 impl PageComponent {
-    pub fn new(page: Page, config: Arc<Config>, theme: Arc<Theme>) -> Self {
+    pub fn new(
+        page: Page,
+        config: Arc<Config>,
+        theme: Arc<Theme>,
+        picker: Option<ratatui_image::picker::Picker>,
+        action_tx: &UnboundedSender<Action>,
+    ) -> Self {
         let contents_state = PageContentsState {
             list_state: ListState::default().with_selected(Some(0)),
             max_idx_section: page.sections().map(|x| x.len() as u8).unwrap_or_default(),
         };
+
+        Self::spawn_image_fetches(&page.content, &action_tx);
 
         Self {
             page,
@@ -116,6 +136,54 @@ impl PageComponent {
 
             config,
             theme,
+            picker,
+
+            image_cache: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub(crate) fn spawn_image_fetches(
+        document: &wiki_api::document::Document,
+        action_tx: &UnboundedSender<Action>,
+    ) {
+        let client = reqwest::Client::new();
+
+        for (node_index, raw) in document.nodes.iter().enumerate() {
+            if let wiki_api::document::Data::Image(image) = &raw.data {
+                let url = image.src.clone();
+                let tx = action_tx.clone();
+                let client = client.clone();
+                
+                tokio::spawn(async move {
+                    let result = client
+                        .get(url)
+                        .header(
+                            "User-Agent",
+                            format!(
+                                "wiki-tui/{} (https://github.com/stormy-soul/wiki-tui)",
+                                env!("CARGO_PKG_VERSION")
+                            ),
+                        )
+                        .send()
+                        .await
+                        .and_then(|resp| resp.error_for_status());
+
+                    let bytes = match result {
+                        Ok(resp) => resp.bytes().await,
+                        Err(e) => Err(e),
+                    };
+
+                    match bytes {
+                        Ok(bytes) => {
+                            let _ = tx.send(Action::Page(PageAction::ImageLoaded {
+                                node_index,
+                                bytes: bytes.to_vec(),
+                            }));
+                        }
+                        Err(e) => tracing::warn!("failed to fetch image: {e}"),
+                    }
+                });
+            }
         }
     }
 
@@ -134,6 +202,21 @@ impl PageComponent {
                 .map(|x| x.len() as u8)
                 .unwrap_or_default(),
         };
+    }
+
+    fn on_image_loaded(&mut self, node_index: usize, bytes: Vec<u8>) {
+        let Some(picker) = self.picker.as_mut() else { return; };
+
+        let dyn_img = match image::load_from_memory(&bytes) {
+            Ok(img) => img,
+            Err(e) => {
+                tracing::warn!("failed to decode image at node {node_index}: {e}");
+                return;
+            }
+        };
+
+        let protocol = picker.new_resize_protocol(dyn_img);
+        self.image_cache.lock().unwrap().insert(node_index, protocol);
     }
 
     fn render_page(&mut self, width: u16) {
@@ -703,6 +786,8 @@ impl Component for PageComponent {
                 PageAction::SelectNextLink => self.select_next(),
 
                 PageAction::GoToHeader(anchor) => self.select_header(anchor),
+
+                PageAction::ImageLoaded { node_index, bytes } => self.on_image_loaded(node_index, bytes),
             },
             Action::ScrollUp(amount) => self.scroll_up(amount),
             Action::ScrollDown(amount) => self.scroll_down(amount),
@@ -755,6 +840,23 @@ impl Component for PageComponent {
         self.viewport.height = page_area.height;
 
         let rendered_page = rendered_page!(self, page_area.width);
+        
+        let viewport_top = self.viewport.top() as usize;
+        let viewport_take = self.viewport.bottom() as usize;
+        let y_shift: u16 = if self.viewport.y == 0 { 1 } else { 0 };
+
+        let image_widgets: Vec<(u16, usize)> = rendered_page
+            .images
+            .iter()
+            .filter_map(|&(line_idx, node_index)| {
+                if line_idx < viewport_top { return None; }
+                let end = line_idx + crate::renderer::IMAGE_RESERVED_HEIGHT;
+
+                if end > viewport_top + viewport_take { return None; }
+                Some(((line_idx - viewport_top) as u16 + y_shift, node_index))
+            })
+            .collect();
+
         let mut image_patches: Vec<(u16, u16, String, String)> = Vec::new(); // (x, line_idx, text, url)
         
         let mut lines: Vec<Line> = rendered_page
@@ -815,8 +917,6 @@ impl Component for PageComponent {
             lines.pop();
         }
 
-        let y_shift: u16 = if self.viewport.y == 0 { 1 } else { 0 };
-
         f.render_widget(Paragraph::new(lines), page_area);
 
         for (x, line_idx, text, url) in image_patches {
@@ -832,6 +932,23 @@ impl Component for PageComponent {
                 let chunk_str: String = chunk.iter().collect();
                 let hyperlink = format!("\x1B]8;;{}\x07{}\x1B]8;;\x07", url, chunk_str);
                 f.buffer_mut()[(cx, abs_y)].set_symbol(&hyperlink);
+            }
+        }
+
+        for (row, node_index) in image_widgets {
+            if row as usize + crate::renderer::IMAGE_RESERVED_HEIGHT > page_area.height as usize {
+                continue;
+            }
+
+            let image_area = Rect {
+                x: page_area.x,
+                y: page_area.y + row,
+                width: page_area.width,
+                height: crate::renderer::IMAGE_RESERVED_HEIGHT as u16,
+            };
+
+            if let Some(protocol) = self.image_cache.lock().unwrap().get_mut(&node_index) {
+                f.render_stateful_widget(StatefulImage::default(), image_area, protocol);
             }
         }
 

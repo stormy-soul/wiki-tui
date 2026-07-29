@@ -229,6 +229,7 @@ impl Component for SearchComponent {
         sender: mpsc::UnboundedSender<Action>,
         config: Arc<Config>,
         theme: Arc<Theme>,
+        _picker: Option<ratatui_image::picker::Picker>,
     ) -> anyhow::Result<()> {
         self.action_tx = Some(sender);
         self.config = config;

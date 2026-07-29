@@ -52,6 +52,7 @@ pub trait Component {
         action_tx: mpsc::UnboundedSender<Action>,
         config: Arc<Config>,
         theme: Arc<Theme>,
+        picker: Option<ratatui_image::picker::Picker>,
     ) -> Result<()> {
         Ok(())
     }

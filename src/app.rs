@@ -87,13 +87,14 @@ impl Component for AppComponent {
         action_tx: mpsc::UnboundedSender<Action>,
         config: Arc<Config>,
         theme: Arc<Theme>,
+        picker: Option<ratatui_image::picker::Picker>,
     ) -> Result<()> {
         self.search
-            .init(action_tx.clone(), config.clone(), theme.clone())?;
+            .init(action_tx.clone(), config.clone(), theme.clone(), None)?;
         self.page
-            .init(action_tx.clone(), config.clone(), theme.clone())?;
+            .init(action_tx.clone(), config.clone(), theme.clone(), picker)?;
         self.search_bar
-            .init(action_tx.clone(), config.clone(), theme.clone())?;
+            .init(action_tx.clone(), config.clone(), theme.clone(), None)?;
 
         self.page_loader = Some(PageLoader::new(config.clone(), action_tx.clone()));
 

@@ -385,7 +385,7 @@ impl<I, P> PageBuilder<I, P, WithEndpoint, WithLanguage> {
                 .header(
                     "User-Agent",
                     format!(
-                        "wiki-tui/{} (https://github.com/Builditluc/wiki-tui)",
+                        "wiki-tui/{} (https://github.com/stormy-soul/wiki-tui)",
                         env!("CARGO_PKG_VERSION")
                     ),
                 )

@@ -96,6 +96,8 @@ pub enum PageAction {
     SelectNextLink,
 
     GoToHeader(String),
+
+    ImageLoaded { node_index: usize, bytes: Vec<u8> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

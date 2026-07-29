@@ -29,6 +29,7 @@ impl Component for LoggerComponent {
         _: mpsc::UnboundedSender<Action>,
         config: Arc<Config>,
         theme: Arc<Theme>,
+        _picker: Option<ratatui_image::picker::Picker>,
     ) -> Result<()> {
         self.state = TuiWidgetState::new();
         self.config = config;

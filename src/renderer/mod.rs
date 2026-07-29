@@ -6,6 +6,8 @@ use ratatui::style::Style;
 use textwrap::core::Fragment;
 use wiki_api::document::{Document, Node};
 
+pub const IMAGE_RESERVED_HEIGHT: usize = 12;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Word {
     pub index: usize,
@@ -47,4 +49,6 @@ pub struct RenderedDocument {
     pub lines: Vec<Vec<Word>>,
     /// Vec<(y-Coord, idx)>
     pub links: Vec<(usize, usize)>,
+    /// Vec<(y coord of the first row of the reserved block, idx)>
+    pub images: Vec<(usize, usize)>,
 }

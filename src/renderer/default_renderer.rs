@@ -21,6 +21,7 @@ const LIST_PREFIX: char = '-';
 struct Renderer {
     rendered_lines: Vec<Vec<Word>>,
     links: Vec<(usize, usize)>,
+    images: Vec<(usize, usize)>,
 
     current_line: Vec<Word>,
     width: u16,
@@ -38,12 +39,14 @@ impl<'a> Renderer {
             return RenderedDocument {
                 lines: Vec::new(),
                 links: Vec::new(),
+                images: Vec::new(),
             };
         }
 
         let mut renderer = Renderer {
             rendered_lines: Vec::new(),
             links: Vec::new(),
+            images: Vec::new(),
 
             current_line: Vec::new(),
             width,
@@ -59,6 +62,7 @@ impl<'a> Renderer {
         RenderedDocument {
             lines: renderer.rendered_lines,
             links: renderer.links,
+            images: renderer.images,
         }
     }
 
@@ -461,6 +465,7 @@ impl<'a> Renderer {
         let mut sub = Renderer {
             rendered_lines: Vec::new(),
             links: Vec::new(),
+            images: Vec::new(),
             current_line: Vec::new(),
             width,
             text_style: if bold { 
@@ -736,6 +741,12 @@ impl<'a> Renderer {
 
     fn render_image(&mut self, node: Node<'a>, image: &ImageData) {
         self.ensure_empty_line();
+
+        let start_line = self.rendered_lines.len();
+        for _ in 0..crate::renderer::IMAGE_RESERVED_HEIGHT {
+            self.rendered_lines.push(Vec::new());
+        }
+        self.images.push((start_line, node.index()));
 
         self.add_modifier(Modifier::ITALIC | Modifier::UNDERLINED);
         self.set_text_fg(Color::Blue);

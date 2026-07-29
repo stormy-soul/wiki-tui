@@ -53,13 +53,16 @@ async fn main() -> Result<()> {
             Theme::default()
         });
 
+    let mut tui = Tui::new()?;
+    tui.enter()?;
+
+    let picker = tui.picker.clone();
+
     app_component
         .lock()
         .await
-        .init(action_tx.clone(), Arc::new(config), Arc::new(theme))?;
+        .init(action_tx.clone(), Arc::new(config), Arc::new(theme), picker)?;
 
-    let mut tui = Tui::new()?;
-    tui.enter()?;
 
     let _action_tx = action_tx.clone();
     let _root = app_component.clone();

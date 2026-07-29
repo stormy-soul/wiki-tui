@@ -9,10 +9,7 @@ use tracing::{debug, error};
 use uuid::Uuid;
 
 use crate::{
-    action::{Action, ActionResult, PageViewerAction},
-    config::{Config, Theme},
-    terminal::Frame,
-    ui::centered_rect,
+    action::{Action, ActionResult, PageViewerAction}, components::page, config::{Config, Theme}, terminal::Frame, ui::centered_rect
 };
 
 use super::{page::PageComponent, page_language_popup::PageLanguageSelectionComponent, Component};
@@ -37,6 +34,8 @@ pub struct PageViewer {
 
     config: Arc<Config>,
     theme: Arc<Theme>,
+
+    picker: Option<ratatui_image::picker::Picker>,
 
     action_tx: Option<UnboundedSender<Action>>,
 }
@@ -187,7 +186,13 @@ impl PageViewer {
                     // Index pointed to non-existent UUID, treat as new page
                     debug!("index pointed to non-existent uuid, creating new page");
                     let new_page =
-                        PageComponent::new(page.clone(), self.config.clone(), self.theme.clone());
+                        PageComponent::new(
+                            page.clone(),
+                            self.config.clone(),
+                            self.theme.clone(),
+                            self.picker.clone(),
+                            self.action_tx.as_ref().clone().unwrap()
+                        );
                     self.page_cache.insert(page.uuid, new_page.clone());
                     self.page_identifier_index.insert(key, page.uuid);
                     self.page.push(new_page);
@@ -196,7 +201,13 @@ impl PageViewer {
                 // Truly new page, not in index at all
                 debug!("page not in cache or index, creating new PageComponent");
                 let new_page =
-                    PageComponent::new(page.clone(), self.config.clone(), self.theme.clone());
+                    PageComponent::new(
+                        page.clone(),
+                        self.config.clone(),
+                        self.theme.clone(),
+                        self.picker.clone(),
+                        self.action_tx.as_ref().clone().unwrap()
+                    );
                 debug!("adding page to cache and index with key: {:?}", key);
                 self.page_cache.insert(new_page.page.uuid, new_page.clone());
                 self.page_identifier_index.insert(key, new_page.page.uuid);
@@ -233,11 +244,21 @@ impl Component for PageViewer {
         action_tx: UnboundedSender<Action>,
         config: Arc<Config>,
         theme: Arc<Theme>,
+        picker: Option<ratatui_image::picker::Picker>,
     ) -> anyhow::Result<()> {
         self.action_tx = Some(action_tx);
         self.config = config;
         self.theme = theme;
+        self.picker = picker.clone();
         self.load_cache();
+
+        for page in self.page_cache.values_mut() {
+            page.picker = picker.clone();
+            if let Some(tx) = &self.action_tx {
+                page::PageComponent::spawn_image_fetches(&page.page.content, tx);
+            }
+        }
+
         Ok(())
     }
     fn handle_key_events(&mut self, key: crossterm::event::KeyEvent) -> ActionResult {

@@ -8,15 +8,18 @@ use ratatui::prelude::CrosstermBackend as Backend;
 
 pub type Frame<'a> = ratatui::Frame<'a>;
 
+
 pub struct Tui {
     pub terminal: ratatui::Terminal<Backend<std::io::Stdout>>,
+    pub picker: Option<ratatui_image::picker::Picker>,
 }
 
 impl Tui {
     pub fn new() -> Result<Self> {
         let terminal = ratatui::Terminal::new(Backend::new(std::io::stdout()))
             .context("unable to create terminal")?;
-        Ok(Self { terminal })
+        let picker = None;
+        Ok(Self { terminal, picker })
     }
 
     pub fn enter(&mut self) -> Result<()> {
@@ -27,6 +30,8 @@ impl Tui {
             EnableMouseCapture,
             cursor::Hide
         )?;
+        self.picker = Some(ratatui_image::picker::Picker::from_query_stdio()
+            .unwrap_or_else(|_|  ratatui_image::picker::Picker::halfblocks()));
         self.terminal.clear()?;
         Ok(())
     }

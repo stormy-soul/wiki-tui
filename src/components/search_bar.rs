@@ -46,6 +46,7 @@ impl Component for SearchBarComponent {
         _: tokio::sync::mpsc::UnboundedSender<Action>,
         config: Arc<Config>,
         theme: Arc<Theme>,
+        _picker: Option<ratatui_image::picker::Picker>,
     ) -> anyhow::Result<()> {
         self.config = config;
         self.theme = theme;
