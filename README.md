@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/stormy-soul/wiki-tui/main/icons/hicolor/scalable/apps/wiki-tui.svg" width="23%" align="left" alt="Logo; wiki-tui entered into a command line prompt"/><br>
+<img src="https://raw.githubusercontent.com/stormy-soul/wiki-tui/main/icons/hicolor/scalable/apps/wiki-tui.svg" width="25%" align="left" alt="Logo; wiki-tui entered into a command line prompt"/><br><br>
 
 ### WIKI-TUI
 A simple and easy to use Wikipedia Text User Interface
