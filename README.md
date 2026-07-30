@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/stormy-soul/wiki-tui/main/icons/hicolor/scalable/apps/wiki-tui.svg" width="21%" align="left" alt="Logo; wiki-tui entered into a command line prompt"/><br><br>
+<img src="https://raw.githubusercontent.com/stormy-soul/wiki-tui/main/icons/hicolor/scalable/apps/wiki-tui.svg" width="23%" align="left" alt="Logo; wiki-tui entered into a command line prompt"/><br><br>
 
 ### WIKI-TUI
 A simple and easy to use Wikipedia Text User Interface
@@ -21,3 +21,4 @@ It can do everything the original version can, plus image and table rendering. M
 <img width="1896" height="1015" alt="preview_tables" src="https://github.com/user-attachments/assets/227f51c5-a81d-4a4e-a66f-63312e97d20d" />
 
 *Thanks to [Builditluc](https://github.com/Builditluc/) and all the contributors of this project for being cool people!*
+
