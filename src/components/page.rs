@@ -845,15 +845,15 @@ impl Component for PageComponent {
         let viewport_take = self.viewport.bottom() as usize;
         let y_shift: u16 = if self.viewport.y == 0 { 1 } else { 0 };
 
-        let image_widgets: Vec<(u16, usize)> = rendered_page
+        let image_widgets: Vec<(u16, u16, u16, usize)> = rendered_page
             .images
             .iter()
-            .filter_map(|&(line_idx, node_index)| {
+            .filter_map(|&(line_idx, node_index, x, width)| {
                 if line_idx < viewport_top { return None; }
                 let end = line_idx + crate::renderer::IMAGE_RESERVED_HEIGHT;
 
                 if end > viewport_top + viewport_take { return None; }
-                Some(((line_idx - viewport_top) as u16 + y_shift, node_index))
+                Some(((line_idx - viewport_top) as u16 + y_shift, x, width, node_index))
             })
             .collect();
 
@@ -935,15 +935,17 @@ impl Component for PageComponent {
             }
         }
 
-        for (row, node_index) in image_widgets {
+        for (row, x, width, node_index) in image_widgets {
             if row as usize + crate::renderer::IMAGE_RESERVED_HEIGHT > page_area.height as usize {
                 continue;
             }
 
+            if x >= page_area.width { continue; }
+
             let image_area = Rect {
-                x: page_area.x,
+                x: page_area.x + x,
                 y: page_area.y + row,
-                width: page_area.width,
+                width: width.min(page_area.width - x),
                 height: crate::renderer::IMAGE_RESERVED_HEIGHT as u16,
             };
 

@@ -21,7 +21,7 @@ const LIST_PREFIX: char = '-';
 struct Renderer {
     rendered_lines: Vec<Vec<Word>>,
     links: Vec<(usize, usize)>,
-    images: Vec<(usize, usize)>,
+    images: Vec<(usize, usize, u16, u16)>,
 
     current_line: Vec<Word>,
     width: u16,
@@ -286,8 +286,11 @@ impl<'a> Renderer {
         }
     }
 
-    fn plan_table_row(cells: &[Node<'a>], col_count: usize, col_width: u16)
-        -> (Vec<(Vec<Vec<Word>>, usize)>, Vec<bool>) {
+    fn plan_table_row(
+        cells: &[Node<'a>],
+        col_count: usize,
+        col_width: u16
+    ) -> (Vec<(Vec<Vec<Word>>, usize, Vec<(usize, usize, u16, u16)>)>, Vec<bool>) {
             let mut plan: Vec<(Option<Node<'a>>, usize)> = cells
                 .iter()
                 .map(|c| (Some(*c), Self::cell_colspan(c)))
@@ -296,23 +299,23 @@ impl<'a> Renderer {
             let covered: usize = plan.iter().map(|(_, span)| *span).sum();
             if covered < col_count { plan.push((None, col_count - covered)); }
 
-            let rendered: Vec<(Vec<Vec<Word>>, usize)> = plan
+            let rendered: Vec<(Vec<Vec<Word>>, usize, Vec<(usize, usize, u16, u16)>)> = plan
                 .into_iter()
                 .map(|(cell, span)| {
-                    let lines = match cell {
+                    let (lines, images) = match cell {
                         Some(c) => {
                             let header = matches!(c.data(), Data::TableCell { header: true, .. });
                             let width = col_width * span as u16 + (span as u16).saturating_sub(1);
                             Self::render_subtree(c, width, header)
                         }
-                        None => Vec::new(),
+                        None => (Vec::new(), Vec::new()),
                     };
-                    (lines, span)
+                    (lines, span, images)
                 })
                 .collect();
 
-            let mut merged: Vec<(Vec<Vec<Word>>, usize)> = Vec::new();
-            for (lines, span) in rendered {
+            let mut merged: Vec<(Vec<Vec<Word>>, usize, Vec<(usize, usize, u16, u16)>)> = Vec::new();
+            for (lines, span, images) in rendered {
                 if Self::cell_is_empty(&lines) {
                     if let Some(last) = merged.last_mut() {
                         if Self::cell_is_empty(&last.0) {
@@ -321,12 +324,12 @@ impl<'a> Renderer {
                         }
                     }
                 }
-                merged.push((lines, span));
+                merged.push((lines, span, images));
             }
 
             let mut divisions = vec![false; col_count.saturating_sub(1)];
             let mut pos = 0usize;
-            for (idx, (_, span)) in merged.iter().enumerate() {
+            for (idx, (_, span, _)) in merged.iter().enumerate() {
                 pos += span;
                 if idx + 1 < merged.len() && pos >= 1 {
                     divisions[pos - 1] = true;
@@ -336,8 +339,27 @@ impl<'a> Renderer {
         (merged, divisions)
     }
 
-    fn render_table_row_content(&mut self, blocks: &[(Vec<Vec<Word>>, usize)], col_width: u16) {
-        let row_height =blocks.iter().map(|(lines, _)| lines.len()).max().unwrap_or(1).max(1);
+    fn render_table_row_content(
+        &mut self,
+        blocks: &[(Vec<Vec<Word>>, usize, Vec<(usize, usize, u16, u16)>)],
+        col_width: u16
+    ) {
+        let row_start_line = self.rendered_lines.len();
+        let row_height =blocks.iter().map(|(lines, _, _)| lines.len()).max().unwrap_or(1).max(1);
+        let mut x_offset: u16 = 1;
+        for (_, span, images) in blocks {
+            let width = col_width * (*span) as u16 + (*span as u16).saturating_sub(1);
+            for &(local_line, node_index, local_x, local_width) in images {
+                self.images.push((
+                    row_start_line + local_line,
+                    node_index,
+                    x_offset + local_x,
+                    local_width,
+                ));
+            }
+            x_offset += width + 1;
+        }
+
         let border = |content: &str| Word {
             index: usize::MAX,
             content: content.to_string(),
@@ -351,7 +373,7 @@ impl<'a> Renderer {
             self.clear_line();
             self.current_line.push(border("|"));
 
-            for (lines, span) in blocks {
+            for (lines, span, _) in blocks {
                 let width = col_width * (*span) as u16 + (*span as u16).saturating_sub(1);
                 let words = lines.get(line_idx).cloned().unwrap_or_default();
                 let used: usize = words
@@ -393,7 +415,7 @@ impl<'a> Renderer {
         let available = self.width.saturating_sub(border_chars);
         let col_width = (available / col_count as u16).max(3);
 
-        let planned: Vec<(Vec<(Vec<Vec<Word>>, usize)>, Vec<bool>)> = rows
+        let planned: Vec<(Vec<(Vec<Vec<Word>>, usize, Vec<(usize, usize, u16, u16)>)>, Vec<bool>)> = rows
             .iter()
             .map(|row| Self::plan_table_row(row, col_count, col_width))
             .collect();
@@ -461,7 +483,11 @@ impl<'a> Renderer {
         self.clear_line();
     }
 
-    fn render_subtree(node: Node<'a>, width: u16, bold: bool) -> Vec<Vec<Word>> {
+    fn render_subtree(
+        node: Node<'a>,
+        width: u16,
+        bold: bool
+    ) -> (Vec<Vec<Word>>, Vec<(usize, usize, u16, u16)>) {
         let mut sub = Renderer {
             rendered_lines: Vec::new(),
             links: Vec::new(),
@@ -478,7 +504,7 @@ impl<'a> Renderer {
         };
         sub.render_children(node);
         sub.clear_line();
-        sub.rendered_lines
+        (sub.rendered_lines, sub.images)
     }
 
     fn cell_is_empty(lines: &[Vec<Word>]) -> bool {
@@ -746,7 +772,7 @@ impl<'a> Renderer {
         for _ in 0..crate::renderer::IMAGE_RESERVED_HEIGHT {
             self.rendered_lines.push(Vec::new());
         }
-        self.images.push((start_line, node.index()));
+        self.images.push((start_line, node.index(), 0, self.width));
 
         self.add_modifier(Modifier::ITALIC | Modifier::UNDERLINED);
         self.set_text_fg(Color::Blue);

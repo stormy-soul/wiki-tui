@@ -50,5 +50,5 @@ pub struct RenderedDocument {
     /// Vec<(y-Coord, idx)>
     pub links: Vec<(usize, usize)>,
     /// Vec<(y coord of the first row of the reserved block, idx)>
-    pub images: Vec<(usize, usize)>,
+    pub images: Vec<(usize, usize, u16, u16)>,
 }
