@@ -1,5 +1,5 @@
-use ratatui::style::{Color, Modifier, Style};
-use textwrap::wrap_algorithms::{wrap_optimal_fit, Penalties};
+use ratatui::{style::{Color, Modifier, Style}};
+use textwrap::{wrap_algorithms::{Penalties, wrap_optimal_fit}};
 use tracing::warn;
 use wiki_api::{
     document::{Data, Document, HeaderKind, ImageData, Node, UnsupportedElement},
@@ -17,6 +17,13 @@ const BLOCKQUOTE_PADDING: u8 = 4;
 
 const LIST_PADDING: u8 = 1;
 const LIST_PREFIX: char = '-';
+
+struct CellBlock {
+    lines: Vec<Vec<Word>>,
+    span: usize,
+    images: Vec<(usize, usize, u16, u16)>,
+    should_center: bool,
+}
 
 struct Renderer {
     rendered_lines: Vec<Vec<Word>>,
@@ -57,12 +64,30 @@ impl<'a> Renderer {
             prefix: None,
         };
 
-        renderer.render_node(document.nth(0).unwrap());
+        renderer.render_root(document.nth(0).unwrap());
 
         RenderedDocument {
             lines: renderer.rendered_lines,
             links: renderer.links,
             images: renderer.images,
+        }
+    }
+
+    fn render_root(&mut self, root: Node<'a>) {
+        let mut flat: Vec<Node<'a>> = Vec::new();
+        Self::flatten_for_float(root, &mut flat);
+
+        let mut i = 0;
+        while i < flat.len() {
+            let child = flat[i];
+
+            if matches!(child.data(), Data::Table { is_infobox: true }) {
+                i = self.render_floating_infobox(child, &flat, i);
+                continue;
+            }
+
+            self.render_node(child);
+            i += 1;
         }
     }
 
@@ -265,6 +290,10 @@ impl<'a> Renderer {
         self.prefix = None;
     }
 
+    fn cell_is_empty(lines: &[Vec<Word>]) -> bool {
+        lines.iter().all(|line| line.iter().all(|w| w.content.trim().is_empty()))
+    }
+
     fn add_horizontal_line(&mut self) {
         let remaining_width = (self.width as usize) - self.current_width();
         let line = Word {
@@ -286,11 +315,18 @@ impl<'a> Renderer {
         }
     }
 
-    fn plan_table_row(
-        cells: &[Node<'a>],
-        col_count: usize,
-        col_width: u16
-    ) -> (Vec<(Vec<Vec<Word>>, usize, Vec<(usize, usize, u16, u16)>)>, Vec<bool>) {
+    fn flatten_for_float(node: Node<'a>, out: &mut Vec<Node<'a>>) {
+        for child in node.children() {
+            match child.data() {
+                Data::Section { .. } | Data::Unknown | Data::Division => {
+                    Self::flatten_for_float(child, out);
+                }
+                _ => out.push(child),
+            }
+        }
+    }
+
+    fn plan_table_row(cells: &[Node<'a>], col_count: usize, col_width: u16) -> (Vec<CellBlock>, Vec<bool>) {
             let mut plan: Vec<(Option<Node<'a>>, usize)> = cells
                 .iter()
                 .map(|c| (Some(*c), Self::cell_colspan(c)))
@@ -299,38 +335,47 @@ impl<'a> Renderer {
             let covered: usize = plan.iter().map(|(_, span)| *span).sum();
             if covered < col_count { plan.push((None, col_count - covered)); }
 
-            let rendered: Vec<(Vec<Vec<Word>>, usize, Vec<(usize, usize, u16, u16)>)> = plan
+            let rendered: Vec<CellBlock> = plan
                 .into_iter()
                 .map(|(cell, span)| {
                     let (lines, images) = match cell {
                         Some(c) => {
                             let header = matches!(c.data(), Data::TableCell { header: true, .. });
                             let width = col_width * span as u16 + (span as u16).saturating_sub(1);
-                            Self::render_subtree(c, width, header)
+                            let content_width = width.saturating_sub(2);
+
+                            Self::render_subtree(c, content_width, header)
                         }
                         None => (Vec::new(), Vec::new()),
                     };
-                    (lines, span, images)
+                    let should_center = match cell {
+                        Some(c) => { 
+                            matches!(c.data(), Data::TableCell { is_infobox_header: true, .. })
+                                || !images.is_empty()
+                        }
+                        None => false,
+                    };
+                    CellBlock { lines, span, images, should_center }
                 })
                 .collect();
 
-            let mut merged: Vec<(Vec<Vec<Word>>, usize, Vec<(usize, usize, u16, u16)>)> = Vec::new();
-            for (lines, span, images) in rendered {
-                if Self::cell_is_empty(&lines) {
+            let mut merged: Vec<CellBlock> = Vec::new();
+            for block in rendered {
+                if Self::cell_is_empty(&block.lines) {
                     if let Some(last) = merged.last_mut() {
-                        if Self::cell_is_empty(&last.0) {
-                            last.1 += span;
+                        if Self::cell_is_empty(&last.lines) {
+                            last.span += block.span;
                             continue;
                         }
                     }
                 }
-                merged.push((lines, span, images));
+                merged.push(block);
             }
 
             let mut divisions = vec![false; col_count.saturating_sub(1)];
             let mut pos = 0usize;
-            for (idx, (_, span, _)) in merged.iter().enumerate() {
-                pos += span;
+            for (idx, block) in merged.iter().enumerate() {
+                pos += block.span;
                 if idx + 1 < merged.len() && pos >= 1 {
                     divisions[pos - 1] = true;
                 }
@@ -339,17 +384,15 @@ impl<'a> Renderer {
         (merged, divisions)
     }
 
-    fn render_table_row_content(
-        &mut self,
-        blocks: &[(Vec<Vec<Word>>, usize, Vec<(usize, usize, u16, u16)>)],
-        col_width: u16
-    ) {
+    fn render_table_row_content(&mut self, blocks: &[CellBlock], col_width: u16) {
         let row_start_line = self.rendered_lines.len();
-        let row_height =blocks.iter().map(|(lines, _, _)| lines.len()).max().unwrap_or(1).max(1);
+        let row_height = blocks.iter().map(|b| b.lines.len()).max().unwrap_or(1).max(1);
+        
         let mut x_offset: u16 = 1;
-        for (_, span, images) in blocks {
-            let width = col_width * (*span) as u16 + (*span as u16).saturating_sub(1);
-            for &(local_line, node_index, local_x, local_width) in images {
+        for block in blocks {
+            let width = col_width * block.span as u16 + (block.span as u16).saturating_sub(1);
+
+            for &(local_line, node_index, local_x, local_width) in &block.images {
                 self.images.push((
                     row_start_line + local_line,
                     node_index,
@@ -371,20 +414,35 @@ impl<'a> Renderer {
 
         for line_idx in 0..row_height {
             self.clear_line();
-            self.current_line.push(border("|"));
+            self.current_line.push(border("│"));
 
-            for (lines, span, _) in blocks {
-                let width = col_width * (*span) as u16 + (*span as u16).saturating_sub(1);
-                let words = lines.get(line_idx).cloned().unwrap_or_default();
-                let used: usize = words
-                    .iter()
-                    .map(|w| w.width as usize + w.whitespace_width as usize)
-                    .sum();
-                let pad = (width as usize).saturating_sub(used).min(255) as u8;
+            for block in blocks {
+                let width = col_width * block.span as u16 + (block.span as u16).saturating_sub(1);
+                
+                let raw_words = block.lines.get(line_idx).cloned().unwrap_or_default();
+                let mut words = Vec::new();
+                
+                let mut used: usize = 0;
+                for word in raw_words {
+                    let word_width = word.width as usize + word.whitespace_width as usize;
+                    if used + word_width > width as usize { break; }
 
-                self.current_line.extend(words);
-                self.current_line.push(self.n_whitespace(pad));
-                self.current_line.push(border("|"));
+                    used += word_width;
+                    words.push(word);
+                }
+
+                let total_pad = (width as usize).saturating_sub(used).min(255);
+
+                if block.should_center {
+                    let left_pad = total_pad / 2;
+                    self.current_line.push(self.n_whitespace(left_pad as u8));
+                    self.current_line.extend(words);
+                    self.current_line.push(self.n_whitespace((total_pad - left_pad) as u8));
+                } else {
+                    self.current_line.extend(words);
+                    self.current_line.push(self.n_whitespace(total_pad as u8));
+                }
+                self.current_line.push(border("│"));
             }
 
             self.clear_line();
@@ -415,7 +473,7 @@ impl<'a> Renderer {
         let available = self.width.saturating_sub(border_chars);
         let col_width = (available / col_count as u16).max(3);
 
-        let planned: Vec<(Vec<(Vec<Vec<Word>>, usize, Vec<(usize, usize, u16, u16)>)>, Vec<bool>)> = rows
+        let planned: Vec<(Vec<CellBlock>, Vec<bool>)> = rows
             .iter()
             .map(|row| Self::plan_table_row(row, col_count, col_width))
             .collect();
@@ -433,6 +491,74 @@ impl<'a> Renderer {
         self.ensure_empty_line();
     }
 
+    fn render_floating_infobox(
+        &mut self,
+        table_node: Node<'a>,
+        children: &[Node<'a>],
+        i: usize
+    ) -> usize {
+        const MIN_WIDTH_FOR_FLOAT: u16 = 80;
+        const GUTTER: u16 = 2;
+
+        if self.width < MIN_WIDTH_FOR_FLOAT { 
+            self.render_node(table_node);
+            return i + 1;
+        }
+
+        let infobox_width = (self.width * 2 / 5).clamp(24, 40);
+        let body_width = self.width - infobox_width - GUTTER;
+
+        let (infobox_lines, infobox_images) = Self::render_subtree(table_node,infobox_width, false);
+        let infobox_height = infobox_lines.len();
+        if infobox_height == 0 {
+            self.render_node(table_node);
+            return i + 1;
+        }
+
+        self.ensure_empty_line();
+        let merge_start = self.rendered_lines.len();
+
+        let saved_with = self.width;
+        self.width = body_width;
+
+        let mut j = i + 1;
+        while j < children.len() && self.rendered_lines.len() - merge_start < infobox_height {
+            self.render_node(children[j]);
+            j += 1;
+        }
+
+        self.width = saved_with;
+ 
+        for row in 0..infobox_height {
+            let line_idx = merge_start + row;
+            if line_idx >= self.rendered_lines.len() {
+                self.rendered_lines.push(Vec::new());
+            }
+            let used: usize = self.rendered_lines[line_idx]
+                .iter()
+                .map(|w| w.width as usize + w.whitespace_width as usize)
+                .sum();
+            let pad = (body_width as usize).saturating_sub(used).min(255);
+
+            let pad_ws = self.n_whitespace(pad as u8);
+            let gutter_ws = self.n_whitespace(GUTTER as u8);
+
+            self.rendered_lines[line_idx].push(pad_ws);
+            self.rendered_lines[line_idx].push(gutter_ws);
+
+            if let Some(infobox_row) = infobox_lines.get(row) {
+                self.rendered_lines[line_idx].extend(infobox_row.clone());
+            }
+        }
+
+        for (local_line, idx, x, w) in infobox_images {
+            self.images.push((merge_start + local_line, idx, body_width + GUTTER + x, w));
+        }
+
+        self.ensure_empty_line();
+        j
+    }
+
     fn render_table_border(
         &mut self,
         col_count: usize,
@@ -444,8 +570,8 @@ impl<'a> Renderer {
         let is_bottom = right.is_none();
 
         let (corner_left, corner_right) = match (is_top, is_bottom) {
-            (true, _) => ('┌', '┐'),
-            (_, true) => ('└', '┘'),
+            (true, _) => ('╭', '╮'),
+            (_, true) => ('╰', '╯'),
             _ => ('├', '┤'),
         };
 
@@ -502,13 +628,9 @@ impl<'a> Renderer {
             left_padding: 0,
             prefix: None,
         };
-        sub.render_children(node);
+        sub.render_node(node);
         sub.clear_line();
         (sub.rendered_lines, sub.images)
-    }
-
-    fn cell_is_empty(lines: &[Vec<Word>]) -> bool {
-        lines.iter().all(|line| line.iter().all(|w| w.content.trim().is_empty()))
     }
 
     fn render_children(&mut self, node: Node<'a>) {
@@ -539,14 +661,14 @@ impl<'a> Renderer {
         self.ensure_empty_line();
 
         if !matches!(kind, &HeaderKind::Main | &HeaderKind::Sub) {
-            self.add_modifier(Modifier::BOLD);
+            self.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
         }
         self.set_text_fg(Color::Red);
 
         self.render_children(node);
 
         if !matches!(kind, &HeaderKind::Main | &HeaderKind::Sub) {
-            self.remove_modifier(Modifier::BOLD);
+            self.remove_modifier(Modifier::BOLD | Modifier::UNDERLINED);
         }
         self.reset_text_fg();
 
@@ -850,7 +972,7 @@ impl<'a> Renderer {
             Data::Link(link) => self.render_link(node, link.clone()),
             Data::Unknown => self.render_children(node),
             Data::Image(image) => self.render_image(node, image),
-            Data::Table => self.render_table(node),
+            Data::Table { .. } => self.render_table(node),
             Data::TableRow | Data::TableCell { .. } => self.render_children(node),
             Data::Unsupported(element) => {
                 self.render_unsupported_element(false, element, node.index())

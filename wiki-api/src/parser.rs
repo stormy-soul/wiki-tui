@@ -65,7 +65,7 @@ impl WikipediaParser {
                 let data = match name.as_str() {
                     "head" | "style" | "link" => return prev,
 
-                    "table" => Data::Table,
+                    "table" => Data::Table{ is_infobox: Self::has_class(&attrs, "infobox") },
 
                     "img" => {
                         ignore_children = true;
@@ -193,11 +193,13 @@ impl WikipediaParser {
                     "tr" => Data::TableRow,
                     "td" => Data::TableCell { 
                         header: false,
-                        colspan: Self::parse_colspan(&attrs)
+                        colspan: Self::parse_colspan(&attrs),
+                        is_infobox_header: false
                     },
                     "th" => Data::TableCell {
                         header: true,
-                        colspan: Self::parse_colspan(&attrs)
+                        colspan: Self::parse_colspan(&attrs),
+                        is_infobox_header: Self::has_class(&attrs, "infobox-header")
                     },
 
                     "tbody" | "thead" | "tfoot" => Data::Division,
@@ -253,6 +255,14 @@ impl WikipediaParser {
             | NodeData::Doctype { .. }
             | NodeData::Comment { .. } => prev,
         }
+    }
+
+    fn has_class(attrs: &[(String, String)], class: &str) -> bool {
+        attrs
+            .iter()
+            .find(|(name, _)| name == "class")
+            .map(|(_, value)| value.split_whitespace().any(|c| c == class))
+            .unwrap_or(false)
     }
 
     fn push_node(&mut self, data: Data, parent: Option<usize>, prev: Option<usize>) -> usize {

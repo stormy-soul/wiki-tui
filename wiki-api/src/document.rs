@@ -72,11 +72,12 @@ pub enum Data {
 
     Image(ImageData),
 
-    Table,
+    Table { is_infobox: bool },
     TableRow,
     TableCell { 
         header: bool,
         colspan: usize,
+        is_infobox_header: bool,
     },
 
     Unsupported(UnsupportedElement),
