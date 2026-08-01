@@ -342,7 +342,7 @@ impl<'a> Renderer {
                         Some(c) => {
                             let header = matches!(c.data(), Data::TableCell { header: true, .. });
                             let width = col_width * span as u16 + (span as u16).saturating_sub(1);
-                            let content_width = width.saturating_sub(2);
+                            let content_width = width.saturating_sub(1);
 
                             Self::render_subtree(c, content_width, header)
                         }
@@ -534,10 +534,19 @@ impl<'a> Renderer {
             if line_idx >= self.rendered_lines.len() {
                 self.rendered_lines.push(Vec::new());
             }
-            let used: usize = self.rendered_lines[line_idx]
-                .iter()
-                .map(|w| w.width as usize + w.whitespace_width as usize)
-                .sum();
+            let mut used: usize = 0;
+            let mut clamped: Vec<Word> = Vec::new();
+
+            for word in self.rendered_lines[line_idx].drain(..) {
+                let word_width = word.width as usize + word.whitespace_width as usize;
+                if used + word_width > body_width as usize {
+                    break;
+                }
+                used += word_width;
+                clamped.push(word);
+            }
+            self.rendered_lines[line_idx] = clamped;
+
             let pad = (body_width as usize).saturating_sub(used).min(255);
 
             let pad_ws = self.n_whitespace(pad as u8);
@@ -700,22 +709,39 @@ impl<'a> Renderer {
         }
 
         let has_trailing_whitespace = content.ends_with(' ');
-        let mut words: Vec<Word> = content
-            .split_whitespace()
-            .map(|word| Word {
-                index,
-                content: word.to_string(),
-                style: self.text_style,
-                width: word.chars().count() as f64,
-                whitespace_width: 1.0,
-                penalty_width: 0.0,
-            })
-            .collect();
+        let max_width = self.width.max(1) as usize;
+        let mut words: Vec<Word> = Vec::new();
 
-        if !has_trailing_whitespace {
-            if let Some(word) = words.last_mut() {
-                word.whitespace_width = 0.0;
+
+        for token in content.split_whitespace() {
+            let token_width = token.chars().count();
+
+            if token_width <= max_width {
+                words.push(Word {
+                    index,
+                    content: token.to_string(),
+                    style: self.text_style,
+                    width: token_width as f64,
+                    whitespace_width: 1.0,
+                    penalty_width: 0.0,
+                });
+            } else {
+                let chars: Vec<char> = token.chars().collect();
+                for chunk in chars.chunks(max_width) {
+                    words.push(Word {
+                        index,
+                        content: chunk.iter().collect(),
+                        style: self.text_style,
+                        width: chunk.len() as f64,
+                        whitespace_width: 0.0,
+                        penalty_width: 0.0,
+                    });
+                }
             }
+        }
+
+        if let Some(word) = words.last_mut() {
+            word.whitespace_width = if has_trailing_whitespace { 1.0 } else { 0.0 };
         }
 
         self.wrap_append(words);

@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use crossterm::event::KeyEvent;
 use ratatui::{
-    prelude::Rect,
-    style::{Color, Modifier, Style},
-    text::Text,
+    layout::Constraint, prelude::{Rect, Layout}, style::{Color, Modifier, Style}, text::Text
 };
 use tui_input::{backend::crossterm::EventHandler, Input};
 
@@ -12,13 +10,11 @@ use crate::{
     action::{Action, ActionResult, SearchAction},
     config::{Config, Theme},
     terminal::Frame,
-    ui::centered_rect,
 };
 
 use super::Component;
 
 const EMPTY_PROMPT: &str = "Search Wikipedia";
-const SEARCH_BAR_X: u16 = 50;
 
 pub const SEARCH_BAR_HEIGTH: u16 = 3;
 
@@ -28,6 +24,7 @@ pub struct SearchBarComponent {
     config: Arc<Config>,
     theme: Arc<Theme>,
     pub is_focussed: bool,
+    pub show_hint: bool,
 }
 
 impl SearchBarComponent {
@@ -99,8 +96,30 @@ impl Component for SearchBarComponent {
         }
         .block(block);
 
-        let input_area = centered_rect(area, SEARCH_BAR_X, 100);
+        let (input_area, hint_area) = if self.show_hint {
+            let splits = Layout::horizontal([Constraint::Percentage(90), Constraint::Percentage(10)])
+                .split(area);
+            (splits[0], Some(splits[1]))
+        } else {
+            (area, None)
+        };
+
         f.render_widget(input, input_area);
+
+        if let Some(hint_area) = hint_area {
+            let hint = self.theme.default_paragraph(Text::styled(
+                    "Contents (Tab)",
+                    Style::default().fg(Color::DarkGray),
+            )).alignment(ratatui::layout::Alignment::Center);
+            let hint_area = Rect {
+                x: hint_area.x,
+                y: hint_area.y + 1,
+                width: hint_area.width,
+                height: 1,
+            };
+            f.render_widget(hint, hint_area);
+        }
+
         if self.is_focussed {
             f.set_cursor_position((
                 // Put cursor past the end of the input text

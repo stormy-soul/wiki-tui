@@ -97,7 +97,7 @@ pub enum PageAction {
 
     GoToHeader(String),
 
-    ImageLoaded { node_index: usize, bytes: Vec<u8> },
+    ImageLoaded { page_uuid: uuid::Uuid, node_index: usize, bytes: Vec<u8> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

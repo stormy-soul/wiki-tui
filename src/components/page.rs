@@ -121,7 +121,7 @@ impl PageComponent {
             max_idx_section: page.sections().map(|x| x.len() as u8).unwrap_or_default(),
         };
 
-        Self::spawn_image_fetches(&page.content, &action_tx);
+        Self::spawn_image_fetches(page.uuid, &page.content, &action_tx);
 
         Self {
             page,
@@ -143,6 +143,7 @@ impl PageComponent {
     }
 
     pub(crate) fn spawn_image_fetches(
+        page_uuid: uuid::Uuid,
         document: &wiki_api::document::Document,
         action_tx: &UnboundedSender<Action>,
     ) {
@@ -176,6 +177,7 @@ impl PageComponent {
                     match bytes {
                         Ok(bytes) => {
                             let _ = tx.send(Action::Page(PageAction::ImageLoaded {
+                                page_uuid,
                                 node_index,
                                 bytes: bytes.to_vec(),
                             }));
@@ -204,7 +206,7 @@ impl PageComponent {
         };
     }
 
-    fn on_image_loaded(&mut self, node_index: usize, bytes: Vec<u8>) {
+    pub(crate) fn on_image_loaded(&mut self, node_index: usize, bytes: Vec<u8>) {
         let Some(picker) = self.picker.as_mut() else { return; };
 
         let dyn_img = match image::load_from_memory(&bytes) {
@@ -674,7 +676,7 @@ impl PageComponent {
     }
 
     fn render_toc(&mut self, f: &mut Frame<'_>, area: Rect) -> Rect {
-        if self.config.page.toc.enabled {
+        if self.config.page.toc.enabled && self.is_contents && !self.is_zen_mode {
             let mut constraints = [
                 Constraint::Percentage(
                     100_u16.saturating_sub(self.config.page.toc.width_percentage),
@@ -775,7 +777,11 @@ impl Component for PageComponent {
         match action {
             Action::Page(page_action) => match page_action {
                 PageAction::SwitchRenderer(renderer) => self.switch_renderer(renderer),
-                PageAction::ToggleContents => self.is_contents = !self.is_contents,
+                PageAction::ToggleContents => {
+                    if !self.is_zen_mode {
+                        self.is_contents = !self.is_contents;
+                    }
+                }
 
                 PageAction::SelectFirstLink => self.select_first(),
                 PageAction::SelectLastLink => self.select_last(),
@@ -787,7 +793,7 @@ impl Component for PageComponent {
 
                 PageAction::GoToHeader(anchor) => self.select_header(anchor),
 
-                PageAction::ImageLoaded { node_index, bytes } => self.on_image_loaded(node_index, bytes),
+                PageAction::ImageLoaded { page_uuid: _, node_index, bytes } => self.on_image_loaded(node_index, bytes),
             },
             Action::ScrollUp(amount) => self.scroll_up(amount),
             Action::ScrollDown(amount) => self.scroll_down(amount),

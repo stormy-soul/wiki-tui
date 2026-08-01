@@ -76,6 +76,12 @@ impl AppComponent {
             (chunks[0], chunks[1])
         };
 
+        self.search_bar.show_hint = self
+            .page
+            .current_page()
+            .map(|p| !p.is_zen_mode())
+            .unwrap_or(false);
+
         self.search_bar.render(f, search_bar_area);
         area
     }
@@ -260,6 +266,10 @@ impl Component for AppComponent {
                 }
 
                 if matches!(action, Action::PageViewer(_)) {
+                    return self.page.update(action);
+                }
+
+                if matches!(action, Action::Page(_)) {
                     return self.page.update(action);
                 }
 

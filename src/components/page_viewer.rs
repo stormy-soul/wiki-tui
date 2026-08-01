@@ -9,7 +9,7 @@ use tracing::{debug, error};
 use uuid::Uuid;
 
 use crate::{
-    action::{Action, ActionResult, PageViewerAction}, components::page, config::{Config, Theme}, terminal::Frame, ui::centered_rect
+    action::{Action, ActionResult, PageAction, PageViewerAction}, components::page, config::{Config, Theme}, terminal::Frame, ui::centered_rect
 };
 
 use super::{page::PageComponent, page_language_popup::PageLanguageSelectionComponent, Component};
@@ -255,7 +255,7 @@ impl Component for PageViewer {
         for page in self.page_cache.values_mut() {
             page.picker = picker.clone();
             if let Some(tx) = &self.action_tx {
-                page::PageComponent::spawn_image_fetches(&page.page.content, tx);
+                page::PageComponent::spawn_image_fetches(page.page.uuid, &page.page.content, tx);
             }
         }
 
@@ -345,6 +345,11 @@ impl Component for PageViewer {
             },
             Action::EnterProcessing => self.is_processing = true,
             Action::EnterNormal => self.is_processing = false,
+            Action::Page(PageAction::ImageLoaded { page_uuid, node_index, bytes }) => {
+                if let Some(page) = self.page_cache.get_mut(&page_uuid) {
+                    page.on_image_loaded(node_index, bytes);
+                }
+            },
             _ => {
                 if let Some(page) = self.current_page_mut() {
                     return page.update(action);
