@@ -17,8 +17,10 @@ It can do everything the original version can, plus image and table rendering. M
 
 ## How it looks
 
-<img width="1896" height="1015" alt="preview_images" src="https://github.com/user-attachments/assets/d6998af7-d8eb-4fc3-aa74-a8d967876f64" />
-<img width="1896" height="1015" alt="preview_tables" src="https://github.com/user-attachments/assets/227f51c5-a81d-4a4e-a66f-63312e97d20d" />
+<img width="1896" height="1015" alt="image" src="https://github.com/user-attachments/assets/298186c5-abe9-4265-a12f-54ee0596bc3d" />
+<img width="1896" height="1015" alt="tables" src="https://github.com/user-attachments/assets/19eb3455-3993-4a63-992e-5c3d37aa7dd0" />
+
+
+<br>
 
 *Thanks to [Builditluc](https://github.com/Builditluc/) and all the contributors of this project for being cool people!*
-
